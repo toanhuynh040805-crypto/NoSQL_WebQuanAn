@@ -1,8 +1,9 @@
 import { BarChart3, CalendarDays, ClipboardList, LayoutDashboard, PackageOpen, Percent, Table2, Tags, Utensils, UsersRound } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
 import { api, money } from '../lib/api.js';
+import PaymentDialog from '../components/PaymentDialog.jsx';
 
 const orderLabels = { pending: 'Chờ xác nhận', confirmed: 'Đã xác nhận', preparing: 'Đang chế biến', ready: 'Sẵn sàng', completed: 'Hoàn thành', cancelled: 'Đã hủy' };
 const reservationLabels = { pending: 'Chờ xác nhận', confirmed: 'Đã xác nhận', seated: 'Đã nhận bàn', completed: 'Hoàn thành', cancelled: 'Đã hủy', 'no-show': 'Không đến' };
@@ -23,7 +24,7 @@ const tabConfig = [
 ];
 
 export default function OperationsPage() {
-  const { user, notify } = useApp();
+  const { user, authReady, notify } = useApp();
   const [params, setParams] = useSearchParams();
   const allowedTabs = useMemo(() => tabConfig.filter(tab => tab[3].includes(user?.role)), [user]);
   const requestedTab = params.get('tab');
@@ -55,6 +56,7 @@ export default function OperationsPage() {
     } catch (error) { notify(error.message); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [activeTab, user]);
+  if (!authReady) return <div className="empty">Đang xác thực...</div>;
   if (!permitted) return <Navigate to="/" replace />;
 
   const action = async (request, success) => {
@@ -89,16 +91,24 @@ function Overview({ data }) {
 }
 
 function Orders({ data, user, action }) {
-  return <div className="admin-table-wrap"><table><thead><tr><th>Mã đơn</th><th>Khách/Bàn</th><th>Món</th><th>Thanh toán</th><th>Trạng thái</th></tr></thead><tbody>{(data.orders || []).map(order => <tr key={order._id}><td><b>{order.orderCode}</b><small>{new Date(order.createdAt).toLocaleString('vi-VN')}</small></td><td>{order.customer?.fullName}<small>{order.tableNumber || 'Mang về'}</small></td><td>{order.items.map(item => `${item.quantity}× ${item.name}`).join(', ')}</td><td><b>{money(order.totalAmount ?? order.subtotal)}</b>{['admin', 'cashier'].includes(user.role) && <select value={order.paymentStatus} onChange={e => action(() => api(`/api/orders/${order._id}/payment`, { method: 'PATCH', body: JSON.stringify({ paymentStatus: e.target.value }) }), 'Đã cập nhật thanh toán')}><option value="pending">Chưa thanh toán</option><option value="paid">Đã thanh toán</option><option value="refunded">Đã hoàn tiền</option></select>}</td><td><select value={order.status} disabled={['completed','cancelled'].includes(order.status)} onChange={e => action(() => api(`/api/orders/${order._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) }), 'Đã cập nhật đơn')}><option value="pending" disabled>{orderLabels.pending}</option><option value="confirmed">{orderLabels.confirmed}</option><option value="preparing">{orderLabels.preparing}</option><option value="ready">{orderLabels.ready}</option><option value="completed">{orderLabels.completed}</option><option value="cancelled">{orderLabels.cancelled}</option></select></td></tr>)}</tbody></table></div>;
+  const [paying, setPaying] = useState(null);
+  return <><div className="admin-table-wrap"><table><thead><tr><th>Mã đơn</th><th>Khách/Bàn</th><th>Món</th><th>Thanh toán</th><th>Trạng thái</th></tr></thead><tbody>{(data.orders || []).map(order => <tr key={order._id}><td><b>{order.orderCode}</b><small>{new Date(order.createdAt).toLocaleString('vi-VN')}</small></td><td>{order.customer?.fullName}<small>{order.tableNumber || 'Mang về'}</small></td><td>{order.items.map(item => `${item.quantity}× ${item.name}`).join(', ')}</td><td><b>{money(order.totalAmount ?? order.subtotal)}</b>{order.paymentStatus === 'paid' ? <small>Đã thanh toán</small> : <small>Chưa thanh toán</small>}
+          {['admin', 'cashier'].includes(user.role) && order.paymentStatus !== 'paid' && !order.tableSession && order.status !== 'cancelled' &&
+            <button type="button" className="table-action" onClick={() => setPaying(order)}>Thu tiền / VietQR</button>}
+          {order.tableSession && <small>Thanh toán tại Sơ đồ bàn</small>}</td><td><select value={order.status} disabled={['completed','cancelled'].includes(order.status)} onChange={e => action(() => api(`/api/orders/${order._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) }), 'Đã cập nhật đơn')}><option value="pending" disabled>{orderLabels.pending}</option><option value="confirmed">{orderLabels.confirmed}</option><option value="preparing">{orderLabels.preparing}</option><option value="ready">{orderLabels.ready}</option><option value="completed">{orderLabels.completed}</option><option value="cancelled">{orderLabels.cancelled}</option></select></td></tr>)}</tbody></table></div>
+    {paying && <PaymentDialog scope="order" id={paying._id} suggestedMethod={paying.paymentMethod}
+      onClose={() => setPaying(null)}
+      onPaid={() => action(() => Promise.resolve(), 'Đã ghi nhận thanh toán đơn hàng')}/>}
+  </>;
 }
 
 function Reservations({ data, action }) {
-  return <div className="admin-table-wrap"><table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Thời gian</th><th>Số khách/Bàn</th><th>Trạng thái</th></tr></thead><tbody>{(data.reservations || []).map(item => <tr key={item._id}><td><b>{item.reservationCode}</b></td><td>{item.customerName}<small>{item.phone}</small></td><td>{new Date(item.reservedAt).toLocaleString('vi-VN')}</td><td>{item.guestCount} khách<select defaultValue={item.table?._id || ''} id={`table-${item._id}`}><option value="">Chưa xếp bàn</option>{(data.tables || []).filter(table => table.capacity >= item.guestCount && table.status !== 'inactive').map(table => <option value={table._id} key={table._id}>{table.name} · {table.capacity} chỗ</option>)}</select></td><td><select value={item.status} onChange={e => { const tableId = document.getElementById(`table-${item._id}`).value || undefined; action(() => api(`/api/reservations/${item._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value, tableId }) }), 'Đã cập nhật đặt bàn'); }}><option value="pending" disabled>{reservationLabels.pending}</option><option value="confirmed">{reservationLabels.confirmed}</option><option value="seated">{reservationLabels.seated}</option><option value="completed">{reservationLabels.completed}</option><option value="cancelled">{reservationLabels.cancelled}</option><option value="no-show">{reservationLabels['no-show']}</option></select></td></tr>)}</tbody></table></div>;
+  return <div className="admin-table-wrap"><table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Thời gian</th><th>Số khách/Bàn</th><th>Trạng thái</th></tr></thead><tbody>{(data.reservations || []).map(item => <tr key={item._id}><td><b>{item.reservationCode}</b></td><td>{item.customerName}<small>{item.phone}</small></td><td>{new Date(item.reservedAt).toLocaleString('vi-VN')}</td><td>{item.guestCount} khách<select defaultValue={item.table?._id || ''} id={`table-${item._id}`}><option value="">Chưa xếp bàn</option>{(data.tables || []).filter(table => table.capacity >= item.guestCount && table.status !== 'inactive').map(table => <option value={table._id} key={table._id}>{table.name} · {table.capacity} chỗ</option>)}</select></td><td><select value={item.status} onChange={e => { const tableId = document.getElementById(`table-${item._id}`).value || undefined; action(() => api(`/api/reservations/${item._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value, tableId }) }), 'Đã cập nhật đặt bàn'); }}><option value="pending" disabled>{reservationLabels.pending}</option><option value="confirmed">{reservationLabels.confirmed}</option><option value="seated" disabled>{reservationLabels.seated} (nhận từ sơ đồ bàn)</option><option value="completed">{reservationLabels.completed}</option><option value="cancelled">{reservationLabels.cancelled}</option><option value="no-show">{reservationLabels['no-show']}</option></select></td></tr>)}</tbody></table></div>;
 }
 
 function Tables({ data, user, action }) {
   const add = () => { const name = prompt('Tên bàn (ví dụ T1-A9):'); if (!name) return; const area = prompt('Khu vực:'); const capacity = Number(prompt('Sức chứa:', '4')); action(() => api('/api/tables', { method: 'POST', body: JSON.stringify({ name, area, capacity }) }), 'Đã thêm bàn'); };
-  return <><div className="toolbar">{user.role === 'admin' && <button className="primary-button compact-button" onClick={add}>+ Thêm bàn</button>}</div><div className="table-grid">{(data.tables || []).map(table => <article className={`table-card ${table.status}`} key={table._id}><Table2/><h3>{table.name}</h3><p>{table.area} · {table.capacity} chỗ</p><select value={table.status} onChange={e => action(() => api(`/api/tables/${table._id}`, { method: 'PUT', body: JSON.stringify({ status: e.target.value }) }), 'Đã cập nhật bàn')}>{Object.entries(tableLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></article>)}</div></>;
+  return <><div className="toolbar">{user.role === 'admin' && <button className="primary-button compact-button" onClick={add}>+ Thêm bàn</button>}</div><div className="table-grid">{(data.tables || []).map(table => <article className={`table-card ${table.status}`} key={table._id}><Table2/><h3>{table.name}</h3><p>{table.area} · {table.capacity} chỗ</p><p><b>{tableLabels[table.status]}</b></p><Link className="table-action" to="/staff/tables">Mở sơ đồ bàn và gọi món</Link></article>)}</div></>;
 }
 
 function Inventory({ data, user, action }) {

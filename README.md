@@ -93,6 +93,21 @@ Tài khoản mẫu sau khi seed:
 | Bếp | `bep@quanan.vn` | `123456` |
 | Thu ngân | `thungan@quanan.vn` | `123456` |
 
+## Khi website không hiển thị thực đơn
+
+- API `/api/foods?limit=50` phải có `foods`; `/api/categories` phải trả về các danh mục.
+- Nếu trả mảng trống, dữ liệu món ăn trong **MongoDB của máy đang chạy** chưa có. Khi backend khởi động mà collection món **hoàn toàn trống**, ứng dụng tự tạo 37 món KLCN và 7 danh mục (không sửa món đã có).
+- Để khôi phục an toàn cả những món thiếu trong DB mà không xóa tài khoản, đơn hàng, phiếu thu và các phiên bàn, chạy **`npm run restore:menu`** từ thư mục dự án rồi tải lại web.
+- **Không dùng `npm run seed` để sửa lỗi mất món** nếu muốn giữ dữ liệu hiện có: đây là lệnh reset demo, xóa dữ liệu hoạt động.
+- Nếu API báo lỗi kết nối, hãy kiểm tra Docker Desktop, `docker compose ps`, terminal backend, và `http://localhost:5000/api/health`. Trên Vite, `/api` và `/images` được chuyển tiếp tới backend cổng 5000.
+- Tên và ảnh món lấy từ bộ dữ liệu KLCN lưu trong `backend/src/data/menuCatalog.js`; ảnh tương ứng nằm trong `backend/public/images/menu`.
+
+## Điều hướng theo tài khoản nhân viên
+
+- Truy cập `/` sẽ đưa tài khoản **phục vụ** và **thu ngân** đến `/staff/tables`, tài khoản **bếp** đến `/kitchen`, tài khoản **quản lý** đến `/operations`.
+- Khách/khách chưa đăng nhập vẫn thấy thực đơn ở `/`; quản trị có thể xem thực đơn bằng đường dẫn `/menu`.
+- Nhân viên không còn thấy nút giỏ hàng/đặt món của khách trong thanh điều hướng. Thu ngân dùng sơ đồ bàn để thu tiền.
+
 ## Luồng dữ liệu đặt món
 
 1. Khách chọn món; API lưu từng mục vào hash Redis `cart:user:<id>` hoặc `cart:guest:<id>`.
@@ -116,11 +131,23 @@ Tài khoản mẫu sau khi seed:
 | `POST` | `/api/reviews` | Đánh giá món |
 | `GET` | `/api/admin/dashboard` | Thống kê quản trị |
 
+## Quy trình bàn phục vụ (nâng cấp từ KLCN)
+
+- Phục vụ, thu ngân và quản lý có trang **/staff/tables** với sơ đồ bàn, lịch đặt, phiên bàn, gọi món trực tiếp và thanh toán.
+- Mỗi bàn chỉ có một phiên active; khóa quyền chỉnh sửa bằng Redis trong 5 phút.
+- Gọi món theo lượt (staff orders), bếp xử lý, phục vụ xác nhận đã mang món ra, thu ngân xác nhận thanh toán trước khi kết thúc phiên.
+- Hướng dẫn và phần KLCN còn thiếu: [docs/STAFF_ORDER_WORKFLOW.md](docs/STAFF_ORDER_WORKFLOW.md).
+- **Thanh toán tiền mặt hoặc chuyển khoản BIDV (VietQR)**: thu ngân mở hóa đơn chung của bàn, nhập tiền khách đưa/tiền thối hoặc xác nhận chuyển khoản sau khi tra cứu khoản tiền thực nhận; lưu `PaymentReceipt` và khóa gọi thêm sau khi thu tiền.
+- Khách đặt từ Web chọn tiền mặt hoặc chuyển khoản khi đặt món, xem QR trong **Đơn của tôi**; doanh thu báo cáo chỉ tính đơn đã thanh toán.
+- Xem chi tiết ngân hàng và các bước bảo đảm an toàn: [docs/PAYMENT_FLOW.md](docs/PAYMENT_FLOW.md).
+
+**Quan trọng:** QR chỉ là hướng dẫn chuyển tiền, **chưa tích hợp đối soát ngân hàng tự động**, thu ngân cần xác minh giao dịch thực tế.
+
 ## Ngoài phạm vi bản đồ án hiện tại
 
 - Tích hợp cổng thanh toán thật và xử lý callback từ nhà cung cấp thanh toán.
 - Tích hợp đơn vị giao hàng, bản đồ và theo dõi tài xế theo thời gian thực.
 - Kết nối máy in bếp, máy in hóa đơn và hóa đơn điện tử theo môi trường triển khai thực tế.
-- Bổ sung kiểm thử tự động, giám sát hệ thống và quy trình sao lưu để triển khai production.
+- Mở rộng kiểm thử tự động và giám sát hệ thống, sao lưu trước khi triển khai production.
 - Chuẩn hóa báo cáo thực nghiệm: thời gian truy vấn, cache hit/miss, truy vấn Cypher và ảnh minh chứng ba CSDL.
 
