@@ -1,0 +1,11 @@
+PING
+SET nosql:demo:cache "Thong tin cache NoSQL" EX 120
+GET nosql:demo:cache
+TTL nosql:demo:cache
+HSET nosql:demo:cart mon01 "2" mon02 "1"
+EXPIRE nosql:demo:cart 120
+HGETALL nosql:demo:cart
+TTL nosql:demo:cart
+ZADD nosql:demo:leaderboard 8 "Lau bo" 5 "Tra dao" 3 "Nuoc suoi"
+EXPIRE nosql:demo:leaderboard 120
+ZREVRANGE nosql:demo:leaderboard 0 9 WITHSCORES

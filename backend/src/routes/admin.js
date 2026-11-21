@@ -44,7 +44,7 @@ router.get('/dashboard', requireRole('admin', 'staff', 'cashier'), asyncHandler(
     Food.countDocuments(),
     Order.countDocuments({ status: { $in: ['pending', 'confirmed', 'preparing', 'ready'] } }),
     Order.aggregate([
-      { $match: { createdAt: { $gte: startOfDay }, status: { $ne: 'cancelled' } } },
+      { $match: { createdAt: { $gte: startOfDay }, paymentStatus: 'paid', status: { $ne: 'cancelled' } } },
       { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }
     ]),
     DiningTable.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
@@ -152,7 +152,7 @@ router.get('/reports', requireRole('admin', 'cashier'), asyncHandler(async (req,
   const to = req.query.to ? new Date(req.query.to) : new Date();
   const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
   to.setHours(23, 59, 59, 999);
-  const match = { createdAt: { $gte: from, $lte: to }, status: { $ne: 'cancelled' } };
+  const match = { createdAt: { $gte: from, $lte: to }, status: { $ne: 'cancelled' }, paymentStatus: 'paid' };
   const [summary, daily, topFoods, statusCounts] = await Promise.all([
     Order.aggregate([{ $match: match }, { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 }, averageOrder: { $avg: '$totalAmount' } } }]),
     Order.aggregate([{ $match: match }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }, { $sort: { _id: 1 } }]),

@@ -1,0 +1,48 @@
+{
+  "note": "Tài liệu JSON minh họa cấu trúc, không phải dữ liệu thật hoặc file import trực tiếp.",
+  "categories": [
+    {
+      "name": "Lẩu bò",
+      "slug": "lau-bo",
+      "type": "food"
+    }
+  ],
+  "foods": [
+    {
+      "name": "Lẩu bò 2-3 người",
+      "slug": "lau-bo-demo",
+      "price": 220000,
+      "unit": "Phần",
+      "isAvailable": true,
+      "tags": [
+        "lau",
+        "bo"
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "orderCode": "OD-EXAMPLE-001",
+      "orderType": "takeaway",
+      "source": "customer",
+      "status": "pending",
+      "items": [
+        {
+          "name": "Lẩu bò 2-3 người",
+          "price": 220000,
+          "quantity": 1,
+          "note": "Ít cay"
+        }
+      ],
+      "totalAmount": 220000,
+      "paymentStatus": "pending"
+    }
+  ],
+  "reviews": [
+    {
+      "rating": 5,
+      "comment": "Món hợp khẩu vị",
+      "isVisible": true
+    }
+  ]
+}

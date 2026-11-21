@@ -93,6 +93,21 @@ Tài khoản mẫu sau khi seed:
 | Bếp | `bep@quanan.vn` | `123456` |
 | Thu ngân | `thungan@quanan.vn` | `123456` |
 
+## Khi website không hiển thị thực đơn
+
+- API `/api/foods?limit=50` phải có `foods`; `/api/categories` phải trả về các danh mục.
+- Nếu trả mảng trống, dữ liệu món ăn trong **MongoDB của máy đang chạy** chưa có. Khi backend khởi động mà collection món **hoàn toàn trống**, ứng dụng tự tạo 37 món KLCN và 7 danh mục (không sửa món đã có).
+- Để khôi phục an toàn cả những món thiếu trong DB mà không xóa tài khoản, đơn hàng, phiếu thu và các phiên bàn, chạy **`npm run restore:menu`** từ thư mục dự án rồi tải lại web.
+- **Không dùng `npm run seed` để sửa lỗi mất món** nếu muốn giữ dữ liệu hiện có: đây là lệnh reset demo, xóa dữ liệu hoạt động.
+- Nếu API báo lỗi kết nối, hãy kiểm tra Docker Desktop, `docker compose ps`, terminal backend, và `http://localhost:5000/api/health`. Trên Vite, `/api` và `/images` được chuyển tiếp tới backend cổng 5000.
+- Tên và ảnh món lấy từ bộ dữ liệu KLCN lưu trong `backend/src/data/menuCatalog.js`; ảnh tương ứng nằm trong `backend/public/images/menu`.
+
+## Điều hướng theo tài khoản nhân viên
+
+- Truy cập `/` sẽ đưa tài khoản **phục vụ** và **thu ngân** đến `/staff/tables`, tài khoản **bếp** đến `/kitchen`, tài khoản **quản lý** đến `/operations`.
+- Khách/khách chưa đăng nhập vẫn thấy thực đơn ở `/`; quản trị có thể xem thực đơn bằng đường dẫn `/menu`.
+- Nhân viên không còn thấy nút giỏ hàng/đặt món của khách trong thanh điều hướng. Thu ngân dùng sơ đồ bàn để thu tiền.
+
 ## Luồng dữ liệu đặt món
 
 1. Khách chọn món; API lưu từng mục vào hash Redis `cart:user:<id>` hoặc `cart:guest:<id>`.
@@ -116,11 +131,61 @@ Tài khoản mẫu sau khi seed:
 | `POST` | `/api/reviews` | Đánh giá món |
 | `GET` | `/api/admin/dashboard` | Thống kê quản trị |
 
+## Quy trình bàn phục vụ (nâng cấp từ KLCN)
+
+- Phục vụ, thu ngân và quản lý có trang **/staff/tables** với sơ đồ bàn, lịch đặt, phiên bàn, gọi món trực tiếp và thanh toán.
+- Mỗi bàn chỉ có một phiên active; khóa quyền chỉnh sửa bằng Redis trong 5 phút.
+- Gọi món theo lượt (staff orders), bếp xử lý, phục vụ xác nhận đã mang món ra, thu ngân xác nhận thanh toán trước khi kết thúc phiên.
+- Hướng dẫn và phần KLCN còn thiếu: [docs/STAFF_ORDER_WORKFLOW.md](docs/STAFF_ORDER_WORKFLOW.md).
+- **Thanh toán tiền mặt hoặc chuyển khoản BIDV (VietQR)**: thu ngân mở hóa đơn chung của bàn, nhập tiền khách đưa/tiền thối hoặc xác nhận chuyển khoản sau khi tra cứu khoản tiền thực nhận; lưu `PaymentReceipt` và khóa gọi thêm sau khi thu tiền.
+- Khách đặt từ Web chọn tiền mặt hoặc chuyển khoản khi đặt món, xem QR trong **Đơn của tôi**; doanh thu báo cáo chỉ tính đơn đã thanh toán.
+- Xem chi tiết ngân hàng và các bước bảo đảm an toàn: [docs/PAYMENT_FLOW.md](docs/PAYMENT_FLOW.md).
+
+**Quan trọng:** QR chỉ là hướng dẫn chuyển tiền, **chưa tích hợp đối soát ngân hàng tự động**, thu ngân cần xác minh giao dịch thực tế.
+
+## Hồ sơ nộp môn NoSQL và nơi xem trực tiếp ba database
+
+Bộ hồ sơ nộp cuối kỳ đã được bổ sung theo yêu cầu giảng viên:
+
+| Mục | File |
+|---|---|
+| Yêu cầu phần mềm | [SRS](docs/SRS.md) |
+| Thiết kế phần mềm | [SDS](docs/SDS.md) |
+| Database Model MongoDB/Redis/Neo4j | [Database Model](docs/DATABASE_MODEL.md) |
+| Use Case, DFD cấp 0/1, Activity, Sequence và ERD | [Sơ đồ](docs/DIAGRAMS.md) |
+| Scripts, JSON mẫu của từng CSDL | [MongoDB](database/mongodb), [Redis](database/redis), [Neo4j](database/neo4j) |
+| Test case và bằng chứng | [Test Cases](docs/TEST_CASES.md), [Bằng chứng cần chụp](docs/EVIDENCE_CHECKLIST.md) |
+| Báo cáo kết quả và hoạt động nhóm | [Báo cáo](docs/FINAL_REPORT.md), [Hoạt động nhóm](docs/GROUP_ACTIVITY.md) |
+| Đối chiếu đề giảng viên | [Checklist](docs/REQUIREMENTS_CHECKLIST.md) |
+| Chuẩn bị nộp | [Hướng dẫn nộp](docs/SUBMISSION_GUIDE.md) |
+| **Mở và chỉ ra MongoDB / Redis / Neo4j** | **[Hướng dẫn xem 3 cơ sở dữ liệu](docs/NO_SQL_RUNBOOK.md)** |
+
+**Ngay trên website:** đăng nhập tài khoản quản trị → **Vận hành → CSDL NoSQL**
+(đường dẫn `http://localhost:5173/operations?tab=nosql`) để xem số lượng tài liệu MongoDB, key/TTL Redis và node/quan hệ Neo4j đọc trực tiếp. Chỉ admin được xem.
+
+**Trong code:**
+- Docker khai báo ba máy chủ ở `docker-compose.yml`, cấu hình `.env.example`, kết nối `backend/src/config/database.js`.
+- MongoDB `backend/src/models/` và `routes/`, tên database `restaurant_nosql`, cổng 27017.
+- Redis `backend/src/services/cart.js`, `cache.js`, `routes/staff.js`, cổng 6379.
+- Neo4j `backend/src/services/graph.js`, `routes/recommendations.js`, Bolt cổng 7687, Browser cổng 7474.
+
+Kiểm tra môi trường phát triển bằng lệnh **chỉ đọc** (cần ba container đang hoạt động):
+```powershell
+npm run verify:databases
+npm run test:course
+```
+
+Sau khi backend chạy, muốn tự đo thời gian phản hồi HTTP của API danh mục:
+```powershell
+node scripts/benchmark-nosql.mjs
+```
+Lưu số liệu chạy thật vào báo cáo; không được coi số liệu minh họa là kết quả đo. Trong tài liệu hướng dẫn, Cassandra được nêu như lựa chọn phù hợp với log/time-series; phần yêu cầu chung không khẳng định bắt buộc dùng đủ bốn DBMS. Nhóm vẫn cần xác nhận với giảng viên cách diễn giải “ít nhất bốn loại dữ liệu” và nộp đủ minh chứng.
+
 ## Ngoài phạm vi bản đồ án hiện tại
 
 - Tích hợp cổng thanh toán thật và xử lý callback từ nhà cung cấp thanh toán.
 - Tích hợp đơn vị giao hàng, bản đồ và theo dõi tài xế theo thời gian thực.
 - Kết nối máy in bếp, máy in hóa đơn và hóa đơn điện tử theo môi trường triển khai thực tế.
-- Bổ sung kiểm thử tự động, giám sát hệ thống và quy trình sao lưu để triển khai production.
+- Mở rộng kiểm thử tự động và giám sát hệ thống, sao lưu trước khi triển khai production.
 - Chuẩn hóa báo cáo thực nghiệm: thời gian truy vấn, cache hit/miss, truy vấn Cypher và ảnh minh chứng ba CSDL.
 

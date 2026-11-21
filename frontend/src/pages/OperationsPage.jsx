@@ -1,8 +1,9 @@
-import { BarChart3, CalendarDays, ClipboardList, LayoutDashboard, PackageOpen, Percent, Table2, Tags, Utensils, UsersRound } from 'lucide-react';
+import { BarChart3, CalendarDays, ClipboardList, LayoutDashboard, PackageOpen, Percent, Table2, Tags, Utensils, UsersRound, Database, HardDrive, Network } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
 import { api, money } from '../lib/api.js';
+import PaymentDialog from '../components/PaymentDialog.jsx';
 
 const orderLabels = { pending: 'Chờ xác nhận', confirmed: 'Đã xác nhận', preparing: 'Đang chế biến', ready: 'Sẵn sàng', completed: 'Hoàn thành', cancelled: 'Đã hủy' };
 const reservationLabels = { pending: 'Chờ xác nhận', confirmed: 'Đã xác nhận', seated: 'Đã nhận bàn', completed: 'Hoàn thành', cancelled: 'Đã hủy', 'no-show': 'Không đến' };
@@ -19,11 +20,12 @@ const tabConfig = [
   ['categories', 'Danh mục', Tags, ['admin']],
   ['users', 'Người dùng', UsersRound, ['admin']],
   ['promotions', 'Khuyến mãi', Percent, ['admin']],
-  ['reports', 'Báo cáo', BarChart3, ['admin', 'cashier']]
+  ['reports', 'Báo cáo', BarChart3, ['admin', 'cashier']],
+  ['nosql', 'CSDL NoSQL', Database, ['admin']]
 ];
 
 export default function OperationsPage() {
-  const { user, notify } = useApp();
+  const { user, authReady, notify } = useApp();
   const [params, setParams] = useSearchParams();
   const allowedTabs = useMemo(() => tabConfig.filter(tab => tab[3].includes(user?.role)), [user]);
   const requestedTab = params.get('tab');
@@ -52,9 +54,11 @@ export default function OperationsPage() {
       if (activeTab === 'users') setData(await api('/api/admin/users'));
       if (activeTab === 'promotions') setData(await api('/api/promotions'));
       if (activeTab === 'reports') setData(await api('/api/admin/reports'));
+      if (activeTab === 'nosql') setData(await api('/api/nosql/overview'));
     } catch (error) { notify(error.message); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [activeTab, user]);
+  if (!authReady) return <div className="empty">Đang xác thực...</div>;
   if (!permitted) return <Navigate to="/" replace />;
 
   const action = async (request, success) => {
@@ -81,6 +85,7 @@ function TabContent({ tab, data, user, action }) {
   if (tab === 'users') return <Users data={data} action={action}/>;
   if (tab === 'promotions') return <Promotions data={data} action={action}/>;
   if (tab === 'reports') return <Reports data={data}/>;
+  if (tab === 'nosql') return <NoSQLOverview data={data}/>;
 }
 
 function Overview({ data }) {
@@ -89,16 +94,24 @@ function Overview({ data }) {
 }
 
 function Orders({ data, user, action }) {
-  return <div className="admin-table-wrap"><table><thead><tr><th>Mã đơn</th><th>Khách/Bàn</th><th>Món</th><th>Thanh toán</th><th>Trạng thái</th></tr></thead><tbody>{(data.orders || []).map(order => <tr key={order._id}><td><b>{order.orderCode}</b><small>{new Date(order.createdAt).toLocaleString('vi-VN')}</small></td><td>{order.customer?.fullName}<small>{order.tableNumber || 'Mang về'}</small></td><td>{order.items.map(item => `${item.quantity}× ${item.name}`).join(', ')}</td><td><b>{money(order.totalAmount ?? order.subtotal)}</b>{['admin', 'cashier'].includes(user.role) && <select value={order.paymentStatus} onChange={e => action(() => api(`/api/orders/${order._id}/payment`, { method: 'PATCH', body: JSON.stringify({ paymentStatus: e.target.value }) }), 'Đã cập nhật thanh toán')}><option value="pending">Chưa thanh toán</option><option value="paid">Đã thanh toán</option><option value="refunded">Đã hoàn tiền</option></select>}</td><td><select value={order.status} disabled={['completed','cancelled'].includes(order.status)} onChange={e => action(() => api(`/api/orders/${order._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) }), 'Đã cập nhật đơn')}><option value="pending" disabled>{orderLabels.pending}</option><option value="confirmed">{orderLabels.confirmed}</option><option value="preparing">{orderLabels.preparing}</option><option value="ready">{orderLabels.ready}</option><option value="completed">{orderLabels.completed}</option><option value="cancelled">{orderLabels.cancelled}</option></select></td></tr>)}</tbody></table></div>;
+  const [paying, setPaying] = useState(null);
+  return <><div className="admin-table-wrap"><table><thead><tr><th>Mã đơn</th><th>Khách/Bàn</th><th>Món</th><th>Thanh toán</th><th>Trạng thái</th></tr></thead><tbody>{(data.orders || []).map(order => <tr key={order._id}><td><b>{order.orderCode}</b><small>{new Date(order.createdAt).toLocaleString('vi-VN')}</small></td><td>{order.customer?.fullName}<small>{order.tableNumber || 'Mang về'}</small></td><td>{order.items.map(item => `${item.quantity}× ${item.name}`).join(', ')}</td><td><b>{money(order.totalAmount ?? order.subtotal)}</b>{order.paymentStatus === 'paid' ? <small>Đã thanh toán</small> : <small>Chưa thanh toán</small>}
+          {['admin', 'cashier'].includes(user.role) && order.paymentStatus !== 'paid' && !order.tableSession && order.status !== 'cancelled' &&
+            <button type="button" className="table-action" onClick={() => setPaying(order)}>Thu tiền / VietQR</button>}
+          {order.tableSession && <small>Thanh toán tại Sơ đồ bàn</small>}</td><td><select value={order.status} disabled={['completed','cancelled'].includes(order.status)} onChange={e => action(() => api(`/api/orders/${order._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) }), 'Đã cập nhật đơn')}><option value="pending" disabled>{orderLabels.pending}</option><option value="confirmed">{orderLabels.confirmed}</option><option value="preparing">{orderLabels.preparing}</option><option value="ready">{orderLabels.ready}</option><option value="completed">{orderLabels.completed}</option><option value="cancelled">{orderLabels.cancelled}</option></select></td></tr>)}</tbody></table></div>
+    {paying && <PaymentDialog scope="order" id={paying._id} suggestedMethod={paying.paymentMethod}
+      onClose={() => setPaying(null)}
+      onPaid={() => action(() => Promise.resolve(), 'Đã ghi nhận thanh toán đơn hàng')}/>}
+  </>;
 }
 
 function Reservations({ data, action }) {
-  return <div className="admin-table-wrap"><table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Thời gian</th><th>Số khách/Bàn</th><th>Trạng thái</th></tr></thead><tbody>{(data.reservations || []).map(item => <tr key={item._id}><td><b>{item.reservationCode}</b></td><td>{item.customerName}<small>{item.phone}</small></td><td>{new Date(item.reservedAt).toLocaleString('vi-VN')}</td><td>{item.guestCount} khách<select defaultValue={item.table?._id || ''} id={`table-${item._id}`}><option value="">Chưa xếp bàn</option>{(data.tables || []).filter(table => table.capacity >= item.guestCount && table.status !== 'inactive').map(table => <option value={table._id} key={table._id}>{table.name} · {table.capacity} chỗ</option>)}</select></td><td><select value={item.status} onChange={e => { const tableId = document.getElementById(`table-${item._id}`).value || undefined; action(() => api(`/api/reservations/${item._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value, tableId }) }), 'Đã cập nhật đặt bàn'); }}><option value="pending" disabled>{reservationLabels.pending}</option><option value="confirmed">{reservationLabels.confirmed}</option><option value="seated">{reservationLabels.seated}</option><option value="completed">{reservationLabels.completed}</option><option value="cancelled">{reservationLabels.cancelled}</option><option value="no-show">{reservationLabels['no-show']}</option></select></td></tr>)}</tbody></table></div>;
+  return <div className="admin-table-wrap"><table><thead><tr><th>Mã</th><th>Khách hàng</th><th>Thời gian</th><th>Số khách/Bàn</th><th>Trạng thái</th></tr></thead><tbody>{(data.reservations || []).map(item => <tr key={item._id}><td><b>{item.reservationCode}</b></td><td>{item.customerName}<small>{item.phone}</small></td><td>{new Date(item.reservedAt).toLocaleString('vi-VN')}</td><td>{item.guestCount} khách<select defaultValue={item.table?._id || ''} id={`table-${item._id}`}><option value="">Chưa xếp bàn</option>{(data.tables || []).filter(table => table.capacity >= item.guestCount && table.status !== 'inactive').map(table => <option value={table._id} key={table._id}>{table.name} · {table.capacity} chỗ</option>)}</select></td><td><select value={item.status} onChange={e => { const tableId = document.getElementById(`table-${item._id}`).value || undefined; action(() => api(`/api/reservations/${item._id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value, tableId }) }), 'Đã cập nhật đặt bàn'); }}><option value="pending" disabled>{reservationLabels.pending}</option><option value="confirmed">{reservationLabels.confirmed}</option><option value="seated" disabled>{reservationLabels.seated} (nhận từ sơ đồ bàn)</option><option value="completed">{reservationLabels.completed}</option><option value="cancelled">{reservationLabels.cancelled}</option><option value="no-show">{reservationLabels['no-show']}</option></select></td></tr>)}</tbody></table></div>;
 }
 
 function Tables({ data, user, action }) {
   const add = () => { const name = prompt('Tên bàn (ví dụ T1-A9):'); if (!name) return; const area = prompt('Khu vực:'); const capacity = Number(prompt('Sức chứa:', '4')); action(() => api('/api/tables', { method: 'POST', body: JSON.stringify({ name, area, capacity }) }), 'Đã thêm bàn'); };
-  return <><div className="toolbar">{user.role === 'admin' && <button className="primary-button compact-button" onClick={add}>+ Thêm bàn</button>}</div><div className="table-grid">{(data.tables || []).map(table => <article className={`table-card ${table.status}`} key={table._id}><Table2/><h3>{table.name}</h3><p>{table.area} · {table.capacity} chỗ</p><select value={table.status} onChange={e => action(() => api(`/api/tables/${table._id}`, { method: 'PUT', body: JSON.stringify({ status: e.target.value }) }), 'Đã cập nhật bàn')}>{Object.entries(tableLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></article>)}</div></>;
+  return <><div className="toolbar">{user.role === 'admin' && <button className="primary-button compact-button" onClick={add}>+ Thêm bàn</button>}</div><div className="table-grid">{(data.tables || []).map(table => <article className={`table-card ${table.status}`} key={table._id}><Table2/><h3>{table.name}</h3><p>{table.area} · {table.capacity} chỗ</p><p><b>{tableLabels[table.status]}</b></p><Link className="table-action" to="/staff/tables">Mở sơ đồ bàn và gọi món</Link></article>)}</div></>;
 }
 
 function Inventory({ data, user, action }) {
@@ -132,3 +145,37 @@ function Reports({ data }) {
   return <><div className="stat-grid operations-stats"><div><BarChart3/><span>Doanh thu</span><strong>{money(data.summary?.revenue || 0)}</strong></div><div><ClipboardList/><span>Số đơn</span><strong>{data.summary?.orders || 0}</strong></div><div><Utensils/><span>Trung bình/đơn</span><strong>{money(data.summary?.averageOrder || 0)}</strong></div></div><div className="report-grid"><div className="admin-table-wrap"><h2>Món bán chạy</h2><table><thead><tr><th>Món</th><th>Số lượng</th><th>Doanh thu</th></tr></thead><tbody>{(data.topFoods || []).map(item => <tr key={item._id}><td>{item.name}</td><td>{item.quantity}</td><td>{money(item.revenue)}</td></tr>)}</tbody></table></div><div className="admin-table-wrap"><h2>Doanh thu theo ngày</h2><table><thead><tr><th>Ngày</th><th>Đơn</th><th>Doanh thu</th></tr></thead><tbody>{(data.daily || []).map(item => <tr key={item._id}><td>{item._id}</td><td>{item.orders}</td><td>{money(item.revenue)}</td></tr>)}</tbody></table></div></div></>;
 }
 
+
+function NoSQLOverview({ data }) {
+  const total = values => (values || []).reduce((sum, item) => sum + item.count, 0);
+  return <div className="nosql-console">
+    <p className="nosql-note">Dữ liệu được đọc trực tiếp từ ba hệ quản trị đang chạy, không phải số liệu giả lập.
+      Chỉ quản trị viên được xem trang này. Không hiển thị mật khẩu hoặc thông tin cá nhân.</p>
+    <div className="nosql-grid">
+      <article className="nosql-database"><div className="nosql-header"><Database size={26}/><div><h2>MongoDB</h2><p>Document · localhost:27017</p></div></div>
+        <strong>{total(data.mongodb?.collections)} tài liệu</strong>
+        <p>Database: <code>{data.mongodb?.database || 'restaurant_nosql'}</code></p>
+        <div className="nosql-rows">{(data.mongodb?.collections || []).map(item => <p key={item.name}><code>{item.name}</code><b>{item.count}</b></p>)}</div>
+        <small>Code: backend/src/models/ · backend/src/config/database.js</small>
+      </article>
+      <article className="nosql-database"><div className="nosql-header"><HardDrive size={26}/><div><h2>Redis</h2><p>Key-value · localhost:6379</p></div></div>
+        <strong>{data.redis?.leaderboardItems ?? 0} món trong bảng xếp hạng</strong>
+        <div className="nosql-rows">
+          <p><code>cart:*</code><b>{data.redis?.cartKeys ?? 0} key</b></p>
+          <p><code>table:lock:*</code><b>{data.redis?.tableLockKeys ?? 0} key</b></p>
+          <p><code>token:block:*</code><b>{data.redis?.revokedTokenKeys ?? 0} key</b></p>
+          <p><code>menu:categories TTL</code><b>{data.redis?.menuCacheTtlSeconds ?? '-'} giây</b></p>
+        </div><small>Code: backend/src/services/cart.js · cache.js · config/database.js</small>
+      </article>
+      <article className="nosql-database"><div className="nosql-header"><Network size={26}/><div><h2>Neo4j</h2><p>Graph · localhost:7474</p></div></div>
+        <strong>{(data.neo4j?.nodes || []).reduce((s,x)=>s+x.count,0)} node</strong>
+        <div className="nosql-rows">{(data.neo4j?.nodes || []).map(item => <p key={item.name}><code>{item.name}</code><b>{item.count}</b></p>)}</div>
+        <h3>Quan hệ</h3><div className="nosql-rows">{(data.neo4j?.relationships || []).map(item => <p key={item.name}><code>{item.name}</code><b>{item.count}</b></p>)}</div>
+        <small>Code: backend/src/services/graph.js · config/database.js</small>
+      </article>
+    </div>
+    <p className="nosql-note">Bạn có thể mở <a href="http://localhost:7474" target="_blank" rel="noreferrer">Neo4j Browser</a>,
+      MongoDB Compass tại mongodb://localhost:27017 hoặc Redis CLI để xem trực tiếp. Số lượng key Redis thay đổi
+      theo thời gian và số lượt thao tác. Kiểm tra lúc: {data.checkedAt ? new Date(data.checkedAt).toLocaleString('vi-VN') : '—'}.</p>
+  </div>;
+}

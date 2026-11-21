@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { DiningTable } from '../models/DiningTable.js';
+import { TableSession } from '../models/TableSession.js';
 import { AppError, asyncHandler } from '../utils/errors.js';
 
 const router = Router();
@@ -31,12 +32,22 @@ router.post('/', requireAuth, requireRole('admin'), asyncHandler(async (req, res
 }));
 
 router.put('/:id', requireAuth, requireRole('admin', 'staff'), asyncHandler(async (req, res) => {
-  const table = await DiningTable.findByIdAndUpdate(req.params.id, parseTablePatch(req.body), { new: true, runValidators: true });
+  const changes = parseTablePatch(req.body);
+  if (changes.status) {
+    if (req.user.role !== 'admin') throw new AppError(403, 'Đổi trạng thái bàn cần được thực hiện qua quy trình nhận hoặc trả bàn');
+    if (await TableSession.exists({ table: req.params.id, status: 'active' })) {
+      throw new AppError(409, 'Bàn đang có phiên phục vụ, không thể đổi trạng thái thủ công');
+    }
+  }
+  const table = await DiningTable.findByIdAndUpdate(req.params.id, changes, { new: true, runValidators: true });
   if (!table) throw new AppError(404, 'Không tìm thấy bàn');
   res.json({ table });
 }));
 
 router.delete('/:id', requireAuth, requireRole('admin'), asyncHandler(async (req, res) => {
+  if (await TableSession.exists({ table: req.params.id, status: 'active' })) {
+    throw new AppError(409, 'Không thể ngừng sử dụng bàn đang có khách');
+  }
   const table = await DiningTable.findByIdAndUpdate(req.params.id, { status: 'inactive' }, { new: true });
   if (!table) throw new AppError(404, 'Không tìm thấy bàn');
   res.json({ table, message: 'Đã ngừng sử dụng bàn' });
