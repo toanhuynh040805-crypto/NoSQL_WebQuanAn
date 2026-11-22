@@ -1,5 +1,16 @@
 # Kết quả kiểm thử CI đã xác minh
 
+## Cập nhật khách hàng và chuyển khoản — 22/11/2026
+
+- Nhánh: `main`, commit mã nguồn: `a9514e0a02058c74c89d7f301f1ce0b4e055d597`.
+- Run đã kiểm tra: https://github.com/toanhuynh040805-crypto/NoSQL_WebQuanAn/actions/runs/45036674540
+- `verify`: **success**. Kiểm tra cú pháp backend, 16 bài kiểm tra tài liệu/catalog/vai trò/ngân hàng/workflow/ngày báo cáo/QR và build frontend.
+- `integration`: **success**. Dựng MongoDB, Redis, Neo4j thật trong Docker dùng một lần; seed và kiểm tra dữ liệu; hai bộ kiểm thử HTTP đều đạt.
+- Bộ kiểm thử mới đã chạy: tạo/sửa/khóa/mở khách hàng, phân quyền và ẩn ghi chú, tìm kiếm literal, gắn khách vào phiên bàn, lịch sử/chi tiêu, báo chuyển khoản vẫn pending, thu ngân tiếp nhận bàn, chống dùng mã ngân hàng cho hai hóa đơn, phát lại thanh toán và checkout, cộng điểm đúng một lần và tăng doanh thu đúng số tiền.
+- Kiểm tra QR bổ sung tại máy thực hiện: tạo ma trận QR từ payload VietQR và giải mã lại bằng OpenCV; nội dung đọc được trùng payload đầu vào.
+
+Kết quả xác nhận kỹ thuật trên dữ liệu kiểm thử, không phải giao dịch ngân hàng thật. Hướng dẫn demo: [DEMO_GIANG_VIEN.md](DEMO_GIANG_VIEN.md).
+
 ## 1. Lần chạy đã hoàn tất thành công
 
 - **Repository:** `toanhuynh040805-crypto/NoSQL_WebQuanAn`
