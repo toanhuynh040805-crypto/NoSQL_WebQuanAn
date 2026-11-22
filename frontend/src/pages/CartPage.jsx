@@ -1,5 +1,5 @@
 import { ArrowLeft, Minus, Plus, ReceiptText, ShoppingBag } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext.jsx';
 import { api, money } from '../lib/api.js';
@@ -10,32 +10,35 @@ export default function CartPage() {
   const [orderType, setOrderType] = useState('dine-in');
   const [note, setNote] = useState('');
   const [promotionCode, setPromotionCode] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('counter');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [tables, setTables] = useState([]);
   const [promotions, setPromotions] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+  const requestId = useRef(null);
   const navigate = useNavigate();
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   useEffect(() => {
     Promise.all([api('/api/tables'), api('/api/promotions/active')]).then(([tableData, promoData]) => {
-      setTables(tableData.tables.filter(table => ['available', 'reserved'].includes(table.status)));
+      setTables(tableData.tables.filter(table => table.status === 'available'));
       setPromotions(promoData.promotions);
     }).catch(() => {});
   }, []);
 
   const submit = async () => {
+    if (submitting) return;
     if (!user) return navigate('/login?next=/cart');
+    if (!requestId.current) requestId.current = crypto.randomUUID();
     setSubmitting(true);
     try {
       const data = await api('/api/orders', {
         method: 'POST', body: JSON.stringify({
           orderType, tableNumber: orderType === 'dine-in' ? tableNumber : undefined,
-          note, promotionCode: promotionCode || undefined, paymentMethod
+          note, promotionCode: promotionCode || undefined, paymentMethod, clientRequestId: requestId.current
         })
       });
       await refreshCart();
       notify(`Đặt món thành công: ${data.order.orderCode}`);
-      navigate('/orders');
+      navigate(paymentMethod === 'bank-transfer' ? `/orders?pay=${data.order._id}` : '/orders');
     } catch (error) {
       notify(error.message);
     } finally {
@@ -60,13 +63,13 @@ export default function CartPage() {
         <div className="checkout-title"><ReceiptText size={22}/><h2>Thông tin đặt món</h2></div>
         <label>Hình thức<select value={orderType} onChange={e => setOrderType(e.target.value)}><option value="dine-in">Dùng tại quán</option><option value="takeaway">Mang về</option></select></label>
         {orderType === 'dine-in' && <label>Chọn bàn<select value={tableNumber} onChange={e => setTableNumber(e.target.value)}><option value="">Chọn bàn còn trống</option>{tables.map(table => <option key={table._id} value={table.name}>{table.name} · {table.area} · {table.capacity} chỗ</option>)}</select></label>}
-        <label>Phương thức thanh toán<select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}><option value="counter">Thanh toán tại quầy</option><option value="cash">Tiền mặt</option><option value="bank-transfer">Chuyển khoản</option></select></label>
+        <label>Phương thức thanh toán<select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}><option value="cash">Tiền mặt (thanh toán tại quầy)</option><option value="bank-transfer">Chuyển khoản BIDV (VietQR)</option></select></label>
         <label>Mã khuyến mãi<input value={promotionCode} onChange={e => setPromotionCode(e.target.value.toUpperCase())} placeholder="Ví dụ: WELCOME10" /></label>
         {promotions.length > 0 && <div className="promotion-hints">{promotions.map(item => <button type="button" key={item._id} onClick={() => setPromotionCode(item.code)}><b>{item.code}</b><span>{item.description || item.name}</span></button>)}</div>}
         <label>Ghi chú<textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Ít cay, không hành..." /></label>
         <div className="total"><span>Tổng cộng</span><strong>{money(total)}</strong></div>
         <button className="order-button" disabled={submitting || (orderType === 'dine-in' && !tableNumber)} onClick={submit}>{submitting ? 'Đang gửi...' : user ? 'Xác nhận đặt món' : 'Đăng nhập để đặt món'}</button>
-        <small>Khuyến mãi được kiểm tra và tính lại khi xác nhận đơn.</small>
+        <small>Khuyến mãi được kiểm tra và tính lại khi xác nhận đơn. Với chuyển khoản, QR chính xác sẽ hiển thị ở mục Đơn của tôi; chỉ thu ngân mới xác nhận khi tiền thực nhận.</small>
       </aside>
     </div>
   </section>;

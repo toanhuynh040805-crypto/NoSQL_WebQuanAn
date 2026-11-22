@@ -1,0 +1,8 @@
+PING
+TYPE menu:categories
+TTL menu:categories
+TYPE leaderboard:foods
+ZREVRANGE leaderboard:foods 0 9 WITHSCORES
+SCAN 0 MATCH cart:* COUNT 50
+SCAN 0 MATCH table:lock:* COUNT 50
+SCAN 0 MATCH token:block:* COUNT 50

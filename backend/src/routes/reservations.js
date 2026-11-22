@@ -4,11 +4,28 @@ import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { DiningTable } from '../models/DiningTable.js';
 import { Reservation } from '../models/Reservation.js';
+import { TableSession } from '../models/TableSession.js';
 import { notifyRoles, notifyUser } from '../services/notifications.js';
 import { AppError, asyncHandler } from '../utils/errors.js';
 
 const router = Router();
 router.use(requireAuth);
+
+// Only hold the physical table when a confirmed booking is within the 30-minute arrival window.
+async function refreshTableStatus(tableId) {
+  if (!tableId) return;
+  const activeSession = await TableSession.exists({ table: tableId, status: 'active' });
+  const now = Date.now();
+  const upcoming = activeSession ? null : await Reservation.exists({
+    table: tableId, status: 'confirmed',
+    reservedAt: { $gte: new Date(now - 30 * 60 * 1000), $lte: new Date(now + 30 * 60 * 1000) }
+  });
+  await DiningTable.updateOne(
+    { _id: tableId, status: { $nin: ['inactive', 'cleaning'] } },
+    { $set: { status: activeSession ? 'occupied' : upcoming ? 'reserved' : 'available' } }
+  );
+}
+
 
 router.post('/', asyncHandler(async (req, res) => {
   const body = z.object({
@@ -45,6 +62,7 @@ router.patch('/:id/cancel', asyncHandler(async (req, res) => {
   reservation.status = 'cancelled';
   reservation.statusHistory.push({ status: 'cancelled', changedBy: req.user._id });
   await reservation.save();
+  await refreshTableStatus(reservation.table);
   res.json({ reservation });
 }));
 
@@ -61,23 +79,49 @@ router.patch('/:id/status', requireRole('admin', 'staff'), asyncHandler(async (r
   }).parse(req.body);
   const reservation = await Reservation.findById(req.params.id);
   if (!reservation) throw new AppError(404, 'Không tìm thấy đặt bàn');
-  if (body.tableId) {
-    const table = await DiningTable.findById(body.tableId);
-    if (!table || table.status === 'inactive' || table.capacity < reservation.guestCount) throw new AppError(400, 'Bàn không phù hợp');
-    reservation.table = table._id;
-    if (body.status === 'confirmed') table.status = 'reserved';
-    if (body.status === 'seated') table.status = 'occupied';
-    await table.save();
+  if (['cancelled', 'completed', 'no-show'].includes(reservation.status)) {
+    throw new AppError(409, 'Lịch đặt đã kết thúc');
   }
-  if (['completed', 'cancelled', 'no-show'].includes(body.status) && reservation.table) {
-    await DiningTable.updateOne({ _id: reservation.table }, { status: 'available' });
+  if (body.status === 'seated') {
+    throw new AppError(409, 'Hãy nhận bàn đặt trực tiếp tại Sơ đồ bàn & gọi món để tạo phiên phục vụ');
+  }
+  if (reservation.status === 'seated') {
+    throw new AppError(409, 'Bàn đã được nhận, hãy kết thúc phiên từ sơ đồ bàn và thu ngân');
+  }
+  if (body.status === 'completed') {
+    throw new AppError(409, 'Chỉ hoàn tất lịch đặt sau khi đã nhận và trả bàn từ phiên phục vụ');
+  }
+  const oldTableId = reservation.table ? String(reservation.table) : null;
+  if (body.tableId) {
+    if (!/^[0-9a-fA-F]{24}$/.test(body.tableId)) throw new AppError(400, 'Mã bàn không hợp lệ');
+    const table = await DiningTable.findById(body.tableId);
+    if (!table || table.status === 'inactive' || table.capacity < reservation.guestCount) {
+      throw new AppError(400, 'Bàn không phù hợp');
+    }
+    if (body.status === 'confirmed') {
+      const overlap = await Reservation.exists({
+        _id: { $ne: reservation._id }, table: table._id,
+        status: { $in: ['confirmed', 'seated'] },
+        reservedAt: {
+          $gte: new Date(reservation.reservedAt.getTime() - 30 * 60 * 1000),
+          $lte: new Date(reservation.reservedAt.getTime() + 30 * 60 * 1000)
+        }
+      });
+      if (overlap) throw new AppError(409, 'Bàn đã có lịch đặt trùng khung giờ này');
+    }
+    reservation.table = table._id;
+  }
+  if (body.status === 'confirmed' && !reservation.table) {
+    throw new AppError(400, 'Cần chọn bàn trước khi xác nhận đặt bàn');
   }
   reservation.status = body.status;
   reservation.statusHistory.push({ status: body.status, changedBy: req.user._id });
   await reservation.save();
+  await refreshTableStatus(reservation.table);
+  if (oldTableId && oldTableId !== String(reservation.table)) await refreshTableStatus(oldTableId);
   await notifyUser(reservation.customer, {
     type: 'reservation', title: 'Cập nhật đặt bàn',
-    message: `Yêu cầu ${reservation.reservationCode} đã chuyển sang trạng thái ${body.status}`,
+    message: 'Yêu cầu ' + reservation.reservationCode + ' đã chuyển sang trạng thái ' + body.status,
     link: '/reservations'
   });
   res.json({ reservation: await reservation.populate('table') });

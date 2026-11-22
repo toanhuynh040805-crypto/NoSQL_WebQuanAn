@@ -13,6 +13,7 @@ import { DiningTable } from '../models/DiningTable.js';
 import { Reservation } from '../models/Reservation.js';
 import { clearMenuCache } from '../services/cache.js';
 import { slugify } from '../utils/slug.js';
+import { reportRange } from '../utils/reporting.js';
 import { AppError, asyncHandler } from '../utils/errors.js';
 
 const router = Router();
@@ -37,14 +38,15 @@ function parsePatch(schema, input) {
 }
 
 router.get('/dashboard', requireRole('admin', 'staff', 'cashier'), asyncHandler(async (req, res) => {
-  const startOfDay = new Date();
-  startOfDay.setHours(0, 0, 0, 0);
+  const { to } = reportRange();
+  const startOfDay = new Date(to.getTime() - 86400000 + 1);
   const [users, foods, pendingOrders, today, tables, reservations] = await Promise.all([
     User.countDocuments({ role: 'customer' }),
     Food.countDocuments(),
     Order.countDocuments({ status: { $in: ['pending', 'confirmed', 'preparing', 'ready'] } }),
     Order.aggregate([
-      { $match: { createdAt: { $gte: startOfDay }, status: { $ne: 'cancelled' } } },
+      { $addFields: { accountingAt: { $ifNull: ['$paidAt', '$createdAt'] } } },
+      { $match: { accountingAt: { $gte: startOfDay, $lte: to }, paymentStatus: 'paid', status: { $ne: 'cancelled' } } },
       { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }
     ]),
     DiningTable.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
@@ -142,21 +144,22 @@ router.patch('/users/:id', requireRole('admin'), asyncHandler(async (req, res) =
     role: z.enum(['customer', 'admin', 'staff', 'kitchen', 'cashier']).optional(),
     isActive: z.boolean().optional()
   }).parse(req.body);
-  if (String(req.user._id) === req.params.id && body.isActive === false) throw new AppError(400, 'Không thể khóa chính tài khoản đang sử dụng');
+  if (String(req.user._id) === req.params.id && (body.isActive === false || (body.role && body.role !== 'admin'))) throw new AppError(400, 'Không thể khóa chính tài khoản đang sử dụng');
   const user = await User.findByIdAndUpdate(req.params.id, body, { new: true, runValidators: true }).select('-passwordHash');
   if (!user) throw new AppError(404, 'Không tìm thấy người dùng');
   res.json({ user });
 }));
 
 router.get('/reports', requireRole('admin', 'cashier'), asyncHandler(async (req, res) => {
-  const to = req.query.to ? new Date(req.query.to) : new Date();
-  const from = req.query.from ? new Date(req.query.from) : new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
-  to.setHours(23, 59, 59, 999);
-  const match = { createdAt: { $gte: from, $lte: to }, status: { $ne: 'cancelled' } };
+  const { from, to } = reportRange(req.query);
+  const paid = [
+    { $addFields: { accountingAt: { $ifNull: ['$paidAt', '$createdAt'] } } },
+    { $match: { accountingAt: { $gte: from, $lte: to }, status: { $ne: 'cancelled' }, paymentStatus: 'paid' } }
+  ];
   const [summary, daily, topFoods, statusCounts] = await Promise.all([
-    Order.aggregate([{ $match: match }, { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 }, averageOrder: { $avg: '$totalAmount' } } }]),
-    Order.aggregate([{ $match: match }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
-    Order.aggregate([{ $match: match }, { $unwind: '$items' }, { $group: { _id: '$items.food', name: { $first: '$items.name' }, quantity: { $sum: '$items.quantity' }, revenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } }, { $sort: { quantity: -1 } }, { $limit: 10 }]),
+    Order.aggregate([...paid, { $group: { _id: null, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 }, averageOrder: { $avg: '$totalAmount' } } }]),
+    Order.aggregate([...paid, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$accountingAt', timezone: 'Asia/Ho_Chi_Minh' } }, revenue: { $sum: '$totalAmount' }, orders: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
+    Order.aggregate([...paid, { $unwind: '$items' }, { $group: { _id: '$items.food', name: { $first: '$items.name' }, quantity: { $sum: '$items.quantity' }, revenue: { $sum: { $multiply: ['$items.price', '$items.quantity', { $cond: [{ $gt: ['$subtotal', 0] }, { $divide: ['$totalAmount', '$subtotal'] }, 0] }] } } } }, { $sort: { quantity: -1 } }, { $limit: 10 }]),
     Order.aggregate([{ $match: { createdAt: { $gte: from, $lte: to } } }, { $group: { _id: '$status', count: { $sum: 1 } } }])
   ]);
   res.json({ from, to, summary: summary[0] || { revenue: 0, orders: 0, averageOrder: 0 }, daily, topFoods, statusCounts });

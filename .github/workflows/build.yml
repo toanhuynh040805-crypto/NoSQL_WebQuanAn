@@ -1,0 +1,83 @@
+name: NoSQL restaurant - build checks
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install project dependencies
+        run: npm run install:all
+      - name: Check backend entry point
+        run: npm run check --prefix backend
+      - name: Check backend modules (syntax)
+        run: find backend/src -name '*.js' -print0 | xargs -0 -n1 node --check
+      - name: Verify VietQR beneficiary and CRC
+        run: node --test scripts/payment-bank.test.mjs
+      - name: Validate KLCN menu images and source catalog
+        run: node --test scripts/menu-catalog.test.mjs
+      - name: Check employee role homepages
+        run: node --test scripts/role-home.test.mjs
+      - name: Verify NoSQL course submission files
+        run: npm run test:course
+      - name: Verify order workflow, Vietnam reporting dates and local QR
+        run: node --test scripts/workflow-reporting.test.mjs
+      - name: Build frontend
+        run: npm run build
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install backend dependencies
+        run: npm install --prefix backend
+      - name: Start disposable test databases
+        run: docker compose up -d
+      - name: Seed test data after databases are ready
+        shell: bash
+        run: |
+          ready=0
+          for i in {1..35}; do
+            if npm run seed; then
+              ready=1
+              break
+            fi
+            sleep 6
+          done
+          test "$ready" -eq 1
+      - name: Recover missing catalog without resetting existing data
+        run: npm run restore:menu
+      - name: Inspect MongoDB Redis Neo4j after seed
+        run: npm run verify:databases
+      - name: Start API for integration test
+        shell: bash
+        run: |
+          nohup node backend/src/server.js >/tmp/nosql-api.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:5000/api/health; then exit 0; fi
+            sleep 3
+          done
+          cat /tmp/nosql-api.log
+          exit 1
+      - name: Smoke test - waiter, kitchen, cashier, reservations
+        run: node scripts/smoke-test.mjs
+      - name: Smoke test - customers, transfers, loyalty, duplicates and reporting
+        run: node scripts/customer-payment-smoke.mjs
+      - name: Report backend logs on failure
+        if: failure()
+        run: cat /tmp/nosql-api.log || true
+      - name: Stop disposable databases
+        if: always()
+        run: docker compose down -v

@@ -1,3 +1,4 @@
+import neo4j from 'neo4j-driver';
 import { neo4jDriver } from '../config/database.js';
 
 async function run(query, params = {}) {
@@ -28,6 +29,7 @@ export async function syncCatalogGraph(categories, foods) {
   for (const food of foods) {
     await run(`
       MERGE (f:Food {id: $id}) SET f.name = $name, f.price = $price
+      WITH f
       MATCH (c:Category {id: $categoryId})
       MERGE (f)-[:BELONGS_TO]->(c)
     `, { id: food.id, name: food.name, price: food.price, categoryId: food.category.id });

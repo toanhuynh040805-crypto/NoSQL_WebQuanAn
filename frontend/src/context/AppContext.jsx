@@ -5,6 +5,7 @@ const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
   const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   const [cart, setCart] = useState([]);
   const [toast, setToast] = useState('');
   const [favoriteIds, setFavoriteIds] = useState([]);
@@ -35,7 +36,9 @@ export function AppProvider({ children }) {
       api('/api/auth/me').then(data => {
         setUser(data.user);
         return refreshAccountExtras();
-      }).catch(() => localStorage.removeItem('token'));
+      }).catch(() => localStorage.removeItem('token')).finally(() => setAuthReady(true));
+    } else {
+      setAuthReady(true);
     }
   }, []);
 
@@ -46,6 +49,7 @@ export function AppProvider({ children }) {
     await refreshCart();
     await refreshAccountExtras();
     notify(`Xin chào ${data.user.fullName}`);
+    return data.user;
   };
 
   const register = async payload => {
@@ -54,6 +58,7 @@ export function AppProvider({ children }) {
     setUser(data.user);
     await refreshAccountExtras();
     notify('Đăng ký thành công');
+    return data.user;
   };
 
   const logout = async () => {
@@ -95,10 +100,10 @@ export function AppProvider({ children }) {
   };
 
   const value = useMemo(() => ({
-    user, cart, toast, favoriteIds, unreadNotifications,
+    user, authReady, cart, toast, favoriteIds, unreadNotifications,
     login, register, logout, addToCart, updateCart, refreshCart,
     refreshAccountExtras, toggleFavorite, setUnreadNotifications, notify
-  }), [user, cart, toast, favoriteIds, unreadNotifications]);
+  }), [user, authReady, cart, toast, favoriteIds, unreadNotifications]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

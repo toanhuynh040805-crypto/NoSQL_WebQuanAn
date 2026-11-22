@@ -19,6 +19,10 @@ import tableRoutes from './routes/tables.js';
 import reservationRoutes from './routes/reservations.js';
 import promotionRoutes from './routes/promotions.js';
 import inventoryRoutes from './routes/inventory.js';
+import staffRoutes from './routes/staff.js';
+import paymentRoutes from './routes/payments.js';
+import nosqlRoutes from './routes/nosql.js';
+import customerRoutes from './routes/customers.js';
 import { errorHandler, notFound } from './utils/errors.js';
 
 const app = express();
@@ -45,6 +49,10 @@ app.use('/api/tables', tableRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/promotions', promotionRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/staff', staffRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/nosql', nosqlRoutes);
+app.use('/api/customers', customerRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
